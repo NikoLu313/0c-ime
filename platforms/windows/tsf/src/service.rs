@@ -1094,13 +1094,13 @@ impl TextService_Impl {
         }
         keys::printable(vk, lparam, false) // 中文模式不理 Caps Lock（#168）
             .map(|key| {
-                // 鍵盤排列只影響少數幾個鍵（#83）；其他鍵不多查一次引擎。
-                let layout = if keys::layout_dependent(&key) && st.session.eten_layout() {
-                    keys::Layout::ETen
+                // 鍵盤排列影響數字、= 與 q（#83、許氏）；其他鍵不多查一次引擎。
+                let layout = if keys::layout_dependent(&key) {
+                    st.session.keyboard_layout()
                 } else {
                     keys::Layout::Standard
                 };
-                if key == "=" && layout == keys::Layout::Standard {
+                if key == "=" && layout != keys::Layout::ETen {
                     st.session.emoji_shortcut()
                 } else if keys::tone_key(layout, &key) {
                     // 聲調鍵：沒開中英混打時引擎先把數字留在組字區，緊接空白換成聲調符號（#135）；中英混打時

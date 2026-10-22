@@ -170,14 +170,18 @@ func (s *Session) matchedFor(start, length int) string {
 // fuzzyTouches 回報路徑中 [start, end) 是否與任何跨音鎖定或自動近音修正相交；這樣的段落不進學習。
 func (s *Session) fuzzyTouches(start, end int) bool {
 	for at, lock := range s.locks {
-		if lock.Matched != "" && at < end && start < at+lock.Len {
+		if lock.Matched != "" && at < end && start < at+lock.Len && !s.sharedReading(at, at+lock.Len, lock.Matched) {
 			return true
 		}
 	}
-	return slices.ContainsFunc(s.path, func(g decode.Seg) bool { return g.Matched != "" && g.Start < end && start < g.End })
+	return slices.ContainsFunc(s.path, func(g decode.Seg) bool {
+		return g.Matched != "" && g.Start < end && start < g.End && !s.sharedReading(g.Start, g.End, g.Matched)
+	})
 }
 
 // autoFuzzed 回報目前顯示的路徑是否含自動近音修正。
 func (s *Session) autoFuzzed() bool {
-	return slices.ContainsFunc(s.path, func(g decode.Seg) bool { return g.Matched != "" })
+	return slices.ContainsFunc(s.path, func(g decode.Seg) bool {
+		return g.Matched != "" && !s.sharedReading(g.Start, g.End, g.Matched)
+	})
 }

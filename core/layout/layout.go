@@ -103,6 +103,7 @@ var ETen Layout = withPunct(etenPunct, NameETen,
 const (
 	NameStandard = "standard"
 	NameETen     = "eten"
+	NameHsu      = "hsu"
 )
 
 // ByName 依名稱回傳排列；不認得的名稱回傳 false。
@@ -112,6 +113,17 @@ func ByName(name string) (Layout, bool) {
 		return Standard, true
 	case NameETen:
 		return ETen, true
+	case NameHsu:
+		return Hsu, true
 	}
 	return nil, false
+}
+
+// ResolveSymbol 解讀依組音狀態共用的按鍵。一般排列維持一鍵一符號；
+// 許氏可在加入符號前正規化聲母。排列本身不保存狀態，供多個 Session 共用。
+func ResolveSymbol(l Layout, key rune, c *zhuyin.Composer) (rune, bool) {
+	if h, ok := l.(*hsuLayout); ok {
+		return h.resolve(key, c)
+	}
+	return l.Symbol(key)
 }

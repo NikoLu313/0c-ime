@@ -383,12 +383,16 @@ impl Session {
             .is_some_and(|reply| reply["ok"] == true && reply["info"]["ctrl_punctuation"] == "true")
     }
 
-    /// 引擎目前載入的鍵盤排列是否為倚天 41 鍵（#83）。只在答案依排列而不同的鍵（keys::layout_dependent）查詢；
+    /// 引擎目前載入的鍵盤排列。只在答案依排列而不同的鍵（keys::layout_dependent）查詢；
     /// 引擎不可用或舊版引擎沒有這一項時為標準排列。
-    pub fn eten_layout(&mut self) -> bool {
+    pub fn keyboard_layout(&mut self) -> crate::keys::Layout {
         self.client
             .call(&json!({"op": "health"}))
-            .is_some_and(|reply| reply["ok"] == true && reply["info"]["keyboard_layout"] == "eten")
+            .filter(|reply| reply["ok"] == true)
+            .map(|reply| {
+                crate::keys::Layout::from_name(reply["info"]["keyboard_layout"].as_str().unwrap_or(""))
+            })
+            .unwrap_or(crate::keys::Layout::Standard)
     }
 
     /// 引擎目前載入的中英切換鍵設定（左右 Shift 與單按時限，#117）。在 Shift 單按放開時查詢，
@@ -931,6 +935,38 @@ mod tests {
         assert_eq!(committed.commit, "你好");
         assert!(!committed.composing());
         assert!(s.log.is_empty(), "提交後重播紀錄要清空");
+    }
+
+    // 獨立的許氏引擎（testdata/toy、settings.json 的 keyboard_layout=hsu），不改日常詞庫。
+    #[test]
+    fn hsu_layout_types_punctuation_and_replays_through_the_protocol() {
+        let Ok(pipe) = std::env::var("ZUIN_TEST_HSU_PIPE") else {
+            return;
+        };
+        let mut s = Session::with_client(Client::with_pipe(&pipe));
+        assert_eq!(s.keyboard_layout(), crate::keys::Layout::Hsu);
+        assert_eq!(s.id, 0, "查排列不能建立或改動組字");
+        let unused = s.key("q");
+        assert!(unused.ok && !unused.handled && !unused.composing(), "未使用的 q 交還宿主");
+        for key in ["x", "h", "f", "c", "e", "k", "f", "v", " "] {
+            let next = s.key(key);
+            assert!(next.ok && next.handled, "許氏鍵 {key}: {next:?}");
+        }
+        assert_eq!(s.english_state.text(), "我想吃");
+        s.client.disconnect_for_test();
+        let punct = s.key(",");
+        assert!(punct.ok && punct.handled && punct.reconnected);
+        assert_eq!(punct.text(), "我想吃，", "斷線後按原始許氏按鍵重播，標點不變半形");
+        let committed = s.key("Enter");
+        assert_eq!(committed.commit, "我想吃，");
+        assert!(!committed.composing());
+        for key in ["x", "h"] {
+            assert!(s.key(key).handled);
+        }
+        assert_eq!(s.key("Backspace").text(), "ㄨ");
+        assert!(s.key("h").handled);
+        assert_eq!(s.key("f").text(), "我", "退格後共鍵聲調依目前組音判斷");
+        assert_eq!(s.key("Enter").commit, "我");
     }
 
     #[test]

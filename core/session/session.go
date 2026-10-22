@@ -33,6 +33,7 @@ type candState struct {
 	cursor        int             // 反白的候選（items 的索引）；頁碼由它推得
 	literal       bool            // 符號選單：插入或替換字面文字，不作為詞彙學習
 	pending       bool            // 選取後消耗尚未完成的注音；取消時保留
+	hsuReading    bool            // 許氏共鍵注音：選入後留在 Composer，接著可打聲調
 	raw           bool            // 一音節漢字候選的最後一項是原樣注音
 	matched       []string        // 與 items 等長（或 nil）：近音候選在詞庫中的讀音，原音為空字串
 	labels        []string        // 開啟候選時算一次的顯示原因；不隨反白或翻頁改變
@@ -169,6 +170,8 @@ type Session struct {
 	Opt                Options
 
 	comp            zhuyin.Composer
+	hsuChoice       string           // 明確選定的待完成共鍵注音；接聲調後保持此讀音
+	hsuExact        map[int]bool     // 已完成且明確選定的共鍵讀音，隨編輯點平移
 	pendingLiterals []pendingLiteral // 暫存成字面注音的組音狀態，撤銷旁邊的英數後可接續
 	toggleStash     *pendingStash    // 切到英文時清掉的未打完注音；下一個請求不是立即切回就丟棄（#90）
 	syls            []zhuyin.Syllable
@@ -418,6 +421,7 @@ func (s *Session) setMode(english, restore bool, stash *pendingStash) {
 	s.cand = nil
 	if !english && s.english && restore && stash != nil {
 		s.comp, s.mixed = stash.comp, stash.mixed
+		s.hsuChoice = stash.hsuChoice
 	}
 	s.english = english
 	s.englishWord, s.englishDismissed, s.englishTokenBlocked = false, false, false
@@ -604,6 +608,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		}
 		if !s.comp.Empty() {
 			s.comp.Reset()
+			s.hsuChoice = ""
 			return true, ""
 		}
 		if !s.composing() {
@@ -702,7 +707,11 @@ func (s *Session) key(k string) (handled bool, commit string) {
 			return true, ""
 		}
 	}
-	if sym, ok := s.layout.Symbol(runes[0]); ok {
+	// 共鍵排列須在恢復暫存音節後依目前組音狀態解讀。
+	if s.layout == layout.Hsu {
+		s.restorePendingLiteral()
+	}
+	if sym, ok := layout.ResolveSymbol(s.layout, runes[0], &s.comp); ok {
 		if retype && s.retypeSyllableLiteral(sym) {
 			return true, ""
 		}
@@ -751,8 +760,12 @@ func (s *Session) symbol(sym rune) bool {
 	before := s.comp
 	done, ok := s.comp.Add(sym)
 	if ok {
-		done = s.neutralFallback(done)
-		if s.joinPrefixLiteral(done) {
+		exact := s.layout == layout.Hsu && s.hsuChoice != "" && before.String() == s.hsuChoice
+		s.hsuChoice = ""
+		if !exact {
+			done = s.neutralFallback(done)
+		}
+		if !exact && s.joinPrefixLiteral(done) {
 			return true
 		}
 		// 收進這個音節之後若整段解不出任何路徑（例如 ㄏㄟˊ、單打的 ㄅ＋空白，或候選關閉後多按了
@@ -764,6 +777,13 @@ func (s *Session) symbol(sym rune) bool {
 		decodable := len(s.syls) == 0 || len(s.path) > 0 || s.nearReading
 		saved := s.saveSyllables()
 		s.insert(done)
+		if exact {
+			next := map[int]bool{s.cursor - 1: true}
+			for at := range s.hsuExact {
+				next[at] = true
+			}
+			s.hsuExact = next
+		}
 		// 精確讀音沒有字、但展開近音後整段可成詞的音節照樣收進來（例如 ㄕㄨㄥˋ 打的是 ㄙㄨㄥˋ）：
 		// 顯示維持原樣注音，只有開候選時才出現近音。
 		if s.refresh(); decodable && len(s.path) == 0 {
@@ -771,7 +791,7 @@ func (s *Session) symbol(sym rune) bool {
 				s.nearReading = true
 			} else {
 				s.restoreSyllables(saved)
-				s.insertSyllableLiteral(before, done)
+				s.insertSyllableLiteral(before, done, exact)
 				s.retypeLiteral = true // 多半是打錯：緊接著的同類介音／韻母改這個讀音（#85）
 			}
 		} else if decodable && len(s.path) > 0 && !s.completeDecodable() {
@@ -779,7 +799,7 @@ func (s *Session) symbol(sym rune) bool {
 			// 解碼器會先顯示那個詞的第一個字，接著打的音節接不上時就卡成「工ㄋㄧˇ」。
 			// 同樣原樣留下注音；下一個音節能和它成詞（ㄋㄧ＋ㄗ˙＝妮子）時再收回去解碼。
 			s.restoreSyllables(saved)
-			s.insertSyllableLiteral(before, done)
+			s.insertSyllableLiteral(before, done, exact)
 			s.pendingLiterals[len(s.pendingLiterals)-1].prefix = true
 		}
 		return true
@@ -823,6 +843,7 @@ func (s *Session) backspace() bool {
 	}
 	s.restorePendingLiteral()
 	if s.comp.Backspace() {
+		s.hsuChoice = ""
 		return true
 	}
 	if s.cursor == 0 {
@@ -853,6 +874,7 @@ func (s *Session) shiftLocks(at, delta int) {
 	s.shiftLiterals(at, delta)
 	s.shiftPendingLiterals(at, delta)
 	s.shiftDisplayed(at, delta)
+	s.shiftHsuExact(at, delta)
 	next := map[int]decode.Lock{}
 	for start, l := range s.locks {
 		after := start >= at
@@ -884,7 +906,7 @@ func (s *Session) moveTo(to int) {
 	s.cand = nil
 }
 
-func (s *Session) lattice() input.Lattice { return s.lockLattice(s.front.Expand(s.syls), 0, 0) }
+func (s *Session) lattice() input.Lattice { return s.lockLattice(s.typedLattice(), 0, 0) }
 
 // signature 描述決定解碼結果的所有輸入。只打了聲母、介音等未完成符號時音節序列不變，
 // 不需要重新解碼。
@@ -911,6 +933,9 @@ func (s *Session) signature() string {
 		fmt.Fprintf(&b, "%d:%s:%d:%v:%d:%s;", st, s.locks[st].Word, s.locks[st].Len, s.locks[st].Completion, s.locks[st].LiteralBoundary, s.locks[st].Matched)
 	}
 	for i := range s.syls {
+		if s.hsuExact[i] {
+			fmt.Fprintf(&b, "hsu-exact:%d;", i)
+		}
 		if s.literals[i] {
 			fmt.Fprintf(&b, "literal:%d;", i)
 		}
@@ -970,6 +995,9 @@ func (s *Session) openCandidates(length int) {
 		return
 	}
 	if !s.comp.Empty() {
+		if s.openHsuReadings() {
+			return
+		}
 		s.openSymbols([]string{s.comp.String()}, s.cursor, 0, true)
 		return
 	}
@@ -1149,7 +1177,7 @@ func (s *Session) openAt(pos, length int) bool {
 	s.dec.Evidence = s.localEvidence(begin)
 	s.configureCorrections(begin, end, true)
 	// 與視窗相交的跨音鎖定即將被這次選取取代：不補它們的讀音，原音候選只依打出的音查詢。
-	lat := s.lockLattice(s.front.Expand(s.syls), pos, pos+length)
+	lat := s.lockLattice(s.typedLattice(), pos, pos+length)
 	windows := []decode.Window{{Lat: lat[begin:end], Pinned: pinned}}
 	if near, ok := s.nearWindow(lat, pos, length); ok {
 		near.Lat = near.Lat[begin:end]
@@ -1175,6 +1203,17 @@ func (s *Session) openAt(pos, length int) bool {
 	}
 	if len(near) > 0 {
 		items, matched = mergeFuzzy(items, near, nearMatched)
+	}
+	// 共鍵候選與原音在同一個精確視窗排序，保留實際讀音供鎖定及顯示。
+	if s.layout == layout.Hsu {
+		if matched == nil {
+			matched = make([]string, len(items))
+		}
+		for i, c := range items {
+			if matched[i] == "" && s.sharedReading(pos, pos+length, zhuyin.Key(c.Entry.Reading)) {
+				matched[i] = zhuyin.Key(c.Entry.Reading)
+			}
+		}
 	}
 	// Keep physical keys recoverable without creating Chinese-word preferences.
 	// The ordinary raw-zhuyin candidate remains last for existing clients.
@@ -1349,7 +1388,7 @@ func (s *Session) commit() string {
 	} // 神經模式提交已顯示路徑；Enter 不啟動推論或接受其他欄位的模型更新。
 	text := s.snapshot().Text() // 未完成注音可能在句中，依畫面位置提交。
 	pins := s.readingPins(text)
-	ev := personal.Commit{Syls: s.syls, Rejected: s.rejected}
+	ev := personal.Commit{Syls: s.learningSyllables(), Rejected: s.rejected}
 	for _, g := range s.path {
 		if s.literals[g.Start] {
 			continue // 留下位置間隙，學習模型會在符號後重設上下文
@@ -1485,6 +1524,7 @@ func (s *Session) reset() {
 	s.localBlocked = false
 	s.comp.Reset()
 	s.syls, s.cursor, s.locks, s.rejected, s.cand = nil, 0, map[int]decode.Lock{}, nil, nil
+	s.hsuChoice, s.hsuExact = "", nil
 	s.literals = nil
 	s.pendingLiterals = nil
 	s.displayed = nil
@@ -1516,7 +1556,7 @@ func (s *Session) snapshot() proto.Snapshot {
 		switch l, locked := s.locks[g.Start]; {
 		case locked && l.Word == g.Word && l.LiteralBoundary == 0:
 			style = proto.StyleLocked
-		case g.Correction || g.Matched != "":
+		case g.Correction || g.Matched != "" && !s.sharedReading(g.Start, g.End, g.Matched):
 			style = proto.StyleCorrected
 		case g.Partial:
 			style = proto.StylePartial
@@ -1596,6 +1636,9 @@ func (s *Session) snapshot() proto.Snapshot {
 		if cl.Kind != "" {
 			cl.Title = s.paletteTitle()
 		}
+		if s.cand.hsuReading {
+			cl.Title = "許氏共鍵注音 · 選取後輸入聲調"
+		}
 		if !s.cand.literal && !s.cand.mixed && cl.Length > 0 {
 			cl.Title = "修改「" + s.candidateText() + "」 · Tab 切換詞長"
 		}
@@ -1609,6 +1652,9 @@ func (s *Session) snapshot() proto.Snapshot {
 			}
 			if id < len(s.cand.matched) {
 				item.Note = nearNote(s.cand.matched[id]) // 原音項目是空字串
+				if start, length := s.cand.span(id); s.sharedReading(start, start+length, s.cand.matched[id]) {
+					item.Note = "共鍵 " + s.cand.matched[id]
+				}
 			}
 			if e := s.cand.items[id].Entry; item.Note == "" && s.cand.kind == "" && len(e.Reading) > 0 && s.model.VocabReading(e.Surface, e.Reading) {
 				item.Note = "我的詞彙" // 讓人知道這是自己加的詞、按反悔鍵會刪掉（比照 Apple 注音標「常用」）

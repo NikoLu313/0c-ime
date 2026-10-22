@@ -10,12 +10,12 @@ func (s *Session) configureCorrections(begin, end int, local bool) {
 	if local && !s.private && !s.paused && !s.localBlocked {
 		// 以位置排序，避免 map 順序影響同範圍覆蓋。
 		for at := begin; at < end; at++ {
-			if lock, ok := s.locks[at]; ok && lock.LiteralBoundary == 0 && lock.Matched == "" && at+lock.Len <= end && !s.literals[at] {
+			if lock, ok := s.locks[at]; ok && lock.LiteralBoundary == 0 && (lock.Matched == "" || s.sharedReading(at, at+lock.Len, lock.Matched)) && at+lock.Len <= end && !s.literals[at] {
 				selected = append(selected, personal.Seg{Word: lock.Word, Start: at - begin, End: at + lock.Len - begin, Manual: true, Completion: lock.Completion})
 			}
 		}
 	}
-	syllables := s.syls[begin:end]
+	syllables := s.learningSyllables()[begin:end]
 	s.dec.CorrectionPenalty = s.model.CorrectionPenalty(syllables, selected)
 }
 
@@ -26,7 +26,7 @@ func (s *Session) enclosedSelections() []personal.Seg {
 	var out []personal.Seg
 	for at := range len(s.syls) {
 		lock, ok := s.locks[at]
-		if !ok || lock.LiteralBoundary != 0 || lock.Matched != "" || s.literals[at] {
+		if !ok || lock.LiteralBoundary != 0 || lock.Matched != "" && !s.sharedReading(at, at+lock.Len, lock.Matched) || s.literals[at] {
 			continue
 		}
 		for _, g := range s.path {

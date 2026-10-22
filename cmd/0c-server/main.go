@@ -138,7 +138,7 @@ func serve() string {
 	}
 	eng.DocumentContextOff = !config.DocumentContext
 	eng.Fuzzy = config.FuzzyConfig()
-	eng.MixedInput = config.MixedInput
+	eng.MixedInput = config.EffectiveMixedInput()
 	eng.EnglishAutocomplete = config.EnglishAutocomplete
 	eng.CandidateBeforeCursor = config.CandidateCursor == "before"
 	eng.EmojiShortcut = config.EmojiShortcut
@@ -206,7 +206,8 @@ func serve() string {
 			}
 		}
 	}
-	// 鍵盤排列（#83）：倚天 41 鍵時 session 停用混打與 = 開 Emoji；設定檔的值不動，health 照實回報。
+	// 鍵盤排列（#83）：倚天 41 鍵時 session 停用混打與 = 開 Emoji；許氏保留 Emoji、停用混打。
+	// 設定檔的值不動，health 回報許氏實際使用的混打狀態。
 	eng.Layout, _ = layout.ByName(config.KeyboardLayout)
 	if config.CandidateLayout == "grid" {
 		eng.CandidateColumns = 5
@@ -420,7 +421,7 @@ func serve() string {
 	srv.Info = map[string]string{"version": buildVersion, "protocol": fmt.Sprint(proto.Version),
 		"neural_startup_state": neuralState, "personal_store": personalState, "personal_lock": lockState,
 		"selection_setting": config.Selection, "punctuation": fmt.Sprint(eng.Punct != nil), "document_context": fmt.Sprint(config.DocumentContext),
-		"fuzzy": eng.Fuzzy.Key(), "mixed_input": fmt.Sprint(config.MixedInput), "english_autocomplete": fmt.Sprint(config.EnglishAutocomplete), "left_shift": fmt.Sprint(config.TogglesLeft()), "right_shift": fmt.Sprint(config.TogglesRight()), "toggle_key": config.ToggleKey, "shift_tap_ms": "300", "mode_memory": config.ModeMemory, "start_mode": config.EffectiveStartMode(), "esc_clear": fmt.Sprint(config.EscClear), "space_selects": fmt.Sprint(config.SpaceSelects), "advance_after_select": fmt.Sprint(config.AdvanceAfterSelect),
+		"fuzzy": eng.Fuzzy.Key(), "mixed_input": fmt.Sprint(config.EffectiveMixedInput()), "english_autocomplete": fmt.Sprint(config.EnglishAutocomplete), "left_shift": fmt.Sprint(config.TogglesLeft()), "right_shift": fmt.Sprint(config.TogglesRight()), "toggle_key": config.ToggleKey, "shift_tap_ms": "300", "mode_memory": config.ModeMemory, "start_mode": config.EffectiveStartMode(), "esc_clear": fmt.Sprint(config.EscClear), "space_selects": fmt.Sprint(config.SpaceSelects), "advance_after_select": fmt.Sprint(config.AdvanceAfterSelect),
 		"selection_keys": config.SelectionKeys, "candidate_cursor": config.CandidateCursor, "candidate_layout": config.CandidateLayout, "emoji_shortcut": config.EmojiShortcut, "emoji_equals_first": fmt.Sprint(config.EmojiEqualsFirst),
 		"keyboard_layout": config.KeyboardLayout, "preview_0_2": fmt.Sprint(eng.Preview02), "vocab_state": vocabState,
 		// #123：外殼據此決定要不要把組字中的 Shift＋←／→、候選窗的 Shift＋Delete／⌫ 送給引擎。

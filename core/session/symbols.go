@@ -145,9 +145,10 @@ func (s *Session) insertPendingLiteral() {
 	if s.comp.Empty() {
 		return
 	}
-	pending := pendingLiteral{start: s.cursor, composer: s.comp}
+	pending := pendingLiteral{start: s.cursor, composer: s.comp, hsuChoice: s.hsuChoice}
 	text := s.comp.String()
 	s.comp.Reset()
+	s.hsuChoice = ""
 	s.insertLiteral(text)
 	s.pendingLiterals = append(s.pendingLiterals, pending)
 }
@@ -174,8 +175,18 @@ func (s *Session) selectLiteral(id int) bool {
 	}
 	c := s.cand
 	text := c.items[id].Entry.Surface
+	if c.hsuReading {
+		s.comp.Reset()
+		for _, sym := range text {
+			s.comp.Add(sym)
+		}
+		s.hsuChoice = text
+		s.cand = nil
+		return true
+	}
 	if c.pending {
 		s.comp.Reset()
+		s.hsuChoice = ""
 	}
 	// 先移除被選區間，再逐字插入；游標停在新符號後，可直接繼續輸入。
 	start, length := c.span(id) // 混合清單的原樣注音只替換游標那個字（#161）
@@ -186,7 +197,7 @@ func (s *Session) selectLiteral(id int) bool {
 	if c.keyLiterals[id] != "" {
 		s.insertMixedLiteral(text, false, true)
 	} else if c.syllable != nil {
-		s.insertSyllableLiteral(c.syllable.composer, zhuyin.Syllable(text))
+		s.insertSyllableLiteral(c.syllable.composer, zhuyin.Syllable(text), c.syllable.hsuChoice != "")
 	} else {
 		s.insertLiteral(text)
 	}

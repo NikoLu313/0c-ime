@@ -27,7 +27,11 @@ ShowUninstDetails hide
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "安裝靈犀注音（0c）"
+!ifdef MANUAL_UPDATES
+!define MUI_WELCOMEPAGE_TEXT "此精靈會安裝或升級靈犀注音 ${VERSION}（${CHANNEL_LABEL}）。個人詞庫會保留。$\r$\n$\r$\n這是自訂測試版；安裝完成後會改成手動更新，避免官網新版覆蓋測試功能。$\r$\n$\r$\n請先完成正在輸入的文字，並以目前桌面使用者的同一個帳號允許系統管理員權限。完成後請登出再登入。"
+!else
 !define MUI_WELCOMEPAGE_TEXT "專心把話打完，少為選字停下來。$\r$\n$\r$\n此精靈會安裝或升級靈犀注音 ${VERSION}（${CHANNEL_LABEL}）。個人詞庫會保留。$\r$\n$\r$\n請先完成正在輸入的文字，並以目前桌面使用者的同一個帳號允許系統管理員權限。完成後請登出再登入。"
+!endif
 !insertmacro MUI_PAGE_WELCOME
 !define MUI_LICENSEPAGE_TEXT_TOP "請閱讀靈犀注音使用條款。安裝後可在安裝目錄的 TERMS.md 再次查看。"
 !insertmacro MUI_PAGE_LICENSE "terms.txt"
@@ -179,6 +183,18 @@ install_failed:
 install_success:
   ClearErrors
   WriteRegStr HKCU "${ARP_KEY}" "DisplayVersion" "${VERSION}"
+!ifdef MANUAL_UPDATES
+  ; 自訂預覽版應保留測試功能；公開版與未指定選項的安裝精靈維持原本的更新設定。
+  nsExec::ExecToStack '"$PLUGINSDIR\0c-update.exe" mode manual'
+  Pop $0
+  Pop $1
+  Call TidyOutput
+  DetailPrint "$1"
+  ${If} $0 != "0"
+    StrCpy $1 "輸入法已安裝，但無法改成手動更新。請在靈犀注音設定把更新模式改成手動，再繼續測試。$\r$\n$1"
+    Goto install_failed
+  ${EndIf}
+!endif
   SetErrorLevel 0
 SectionEnd
 

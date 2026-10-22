@@ -626,13 +626,43 @@ mod tests {
         for key in ["5", "6", "7", " ", "a"] {
             assert!(!tone_key(Layout::ETen, key), "{key}");
         }
+        // 許氏的聲調與聲母共鍵：即使關掉聲調符號輸入，d f j s 在空組字時仍要交給核心。
+        for key in 'a'..='z' {
+            let key = key.to_string();
+            assert_eq!(starts_composition(Layout::Hsu, &key), key != "q", "{key}");
+            assert!(!tone_key(Layout::Hsu, &key), "{key}");
+        }
+        for key in [
+            ",", ".", ";", "/", "-", "'", "\\", "<", ">", "?", ":", "\"", "!", "~",
+            "[", "]", "{", "}", "(", ")", "&", "^", "_", "`",
+        ] {
+            assert!(starts_composition(Layout::Hsu, key), "許氏標點 {key}");
+        }
+        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "q", "=", "A", "@", " "] {
+            assert!(!starts_composition(Layout::Hsu, key), "{key}");
+            assert!(!tone_key(Layout::Hsu, key), "{key}");
+        }
         // 只有答案不同的鍵要查排列。
         for c in (0x21u8..0x7f).map(|b| (b as char).to_string()) {
-            let differs = starts_composition(Layout::Standard, &c) != starts_composition(Layout::ETen, &c)
-                || tone_key(Layout::Standard, &c) != tone_key(Layout::ETen, &c);
-            assert!(!differs || layout_dependent(&c), "{c} 的答案依排列而不同，必須查排列");
+            for layout in [Layout::ETen, Layout::Hsu] {
+                let differs = starts_composition(Layout::Standard, &c) != starts_composition(layout, &c)
+                    || tone_key(Layout::Standard, &c) != tone_key(layout, &c);
+                assert!(!differs || layout_dependent(&c), "{c} 的答案依排列而不同，必須查排列");
+            }
         }
-        assert!(layout_dependent("=") && !layout_dependent("a"));
+        assert!(layout_dependent("=") && layout_dependent("q") && !layout_dependent("a"));
+        for key in "0123456789".chars() {
+            assert!(layout_dependent(&key.to_string()), "許氏的數字 {key} 必須查排列");
+        }
+    }
+
+    #[test]
+    fn keyboard_layout_names_follow_health_and_fall_back_for_legacy_engines() {
+        assert_eq!(Layout::from_name("standard"), Layout::Standard);
+        assert_eq!(Layout::from_name("eten"), Layout::ETen);
+        assert_eq!(Layout::from_name("hsu"), Layout::Hsu);
+        assert_eq!(Layout::from_name(""), Layout::Standard);
+        assert_eq!(Layout::from_name("unknown"), Layout::Standard);
     }
 
     #[test]
@@ -763,6 +793,18 @@ mod tests {
 pub enum Layout {
     Standard,
     ETen,
+    Hsu,
+}
+
+impl Layout {
+    /// 舊引擎沒有回報排列，或遇到不認得的排列時，沿用標準排列。
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "eten" => Self::ETen,
+            "hsu" => Self::Hsu,
+            _ => Self::Standard,
+        }
+    }
 }
 
 /// 空組字時可接受的字元，依鍵盤排列。大寫／其他 ASCII 須在 TestKeyDown
@@ -770,26 +812,30 @@ pub enum Layout {
 /// 標準排列的 = 由 Emoji 設定決定（呼叫端處理）。倚天 41 鍵的 = 是 ㄦ、7 是 ㄑ，1–4 是聲調、5 6 不是注音鍵，
 /// ' 是 ㄘ（#83）。標點要跟核心的標點表（core/layout）一致，否則沒在打字時會直接交給應用程式打出半形：
 /// \ 是頓號（#24）、& 是全形＆（#46）、^ 是「……」、_ 是「——」（#118），兩種排列都一樣。
+/// 許氏共鍵由核心依組音狀態解讀；d f j s 在空組字時是聲母，數字與未使用的 q 交還宿主，= 由 Emoji 設定決定。
 pub fn starts_composition(layout: Layout, key: &str) -> bool {
     let keys = match layout {
         Layout::Standard => "`abcdefghijklmnopqrstuvwxyz125890,.;/-<>?:\"!~[]{}'\\()&^_",
         Layout::ETen => "`abcdefghijklmnopqrstuvwxyz7890,.;/-='\\<>?:\"!~[]{}()&^_",
+        Layout::Hsu => "`abcdefghijklmnoprstuvwxyz,.;/-'\\<>?:\"!~[]{}()&^_",
     };
     key.len() == 1 && keys.contains(key)
 }
 
 /// 聲調鍵（不含空白的一聲）：標準排列 3 4 6 7、倚天 1 2 3 4。沒在組字時要不要交給引擎依引擎回報（#135、#175，
 /// 見 session::idle_tone_keys），不在 starts_composition 的固定集合裡。
+/// 許氏沒有獨立的聲調鍵：空組字時 d f j s 都是聲母，不能依聲調設定放行。
 pub fn tone_key(layout: Layout, key: &str) -> bool {
     let keys = match layout {
         Layout::Standard => "3467",
         Layout::ETen => "1234",
+        Layout::Hsu => "",
     };
     key.len() == 1 && keys.contains(key)
 }
 
-/// 兩種排列答案不同的鍵：只有這些鍵需要向引擎查排列，其他鍵不多一次往返。
-/// 6 是標準排列的 ˊ、倚天不是注音鍵（#135）。
+/// 任兩種排列答案不同的鍵：只有這些鍵需要向引擎查排列，其他鍵不多一次往返。
+/// 許氏不用數字組音；3 4 在標準／倚天都是聲調，但許氏必須放行，8 9 0 與未使用的 q 也不再開始組字。
 pub fn layout_dependent(key: &str) -> bool {
-    key.len() == 1 && "12567=".contains(key)
+    key.len() == 1 && "0123456789=q".contains(key)
 }

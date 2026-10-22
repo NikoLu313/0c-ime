@@ -13,8 +13,9 @@ func (s *Session) localEvidence(base int) func(int, int, string, string) (float6
 	if s.paused || s.private || s.localBlocked || len(s.locks) == 0 {
 		return nil
 	}
+	typed := s.learningSyllables()
 	limit := base
-	for limit < len(s.syls) && !s.literals[limit] {
+	for limit < len(typed) && !s.literals[limit] {
 		limit++
 	}
 	type evidence struct {
@@ -27,24 +28,24 @@ func (s *Session) localEvidence(base int) func(int, int, string, string) (float6
 	}
 	var entries []evidence
 	for at, lock := range s.locks {
-		if lock.Completion || lock.LiteralBoundary != 0 || lock.Matched != "" || at < base || at+lock.Len > limit || s.literals[at] || s.model.Store.Tombstones[lock.Word] {
+		if lock.Completion || lock.LiteralBoundary != 0 || lock.Matched != "" && !s.sharedReading(at, at+lock.Len, lock.Matched) || at < base || at+lock.Len > limit || s.literals[at] || s.model.Store.Tombstones[lock.Word] {
 			continue
 		}
-		e := evidence{start: at, word: []rune(lock.Word), reading: s.syls[at : at+lock.Len]}
+		e := evidence{start: at, word: []rune(lock.Word), reading: typed[at : at+lock.Len]}
 		if at > 0 && !s.literals[at-1] {
-			e.left = s.syls[at-1]
+			e.left = typed[at-1]
 		}
-		if end := at + lock.Len; end < len(s.syls) && !s.literals[end] {
-			e.right = s.syls[end]
+		if end := at + lock.Len; end < len(typed) && !s.literals[end] {
+			e.right = typed[end]
 			for _, g := range s.basePath {
 				if g.Start != end || g.End > limit {
 					continue
 				}
 				// 鄰詞只是弱觀察；未成詞的長詞前綴不能憑空當成已接受的詞。
-				for _, entry := range s.model.Source().Exact(s.syls[g.Start:g.End]) {
+				for _, entry := range s.model.Source().Exact(typed[g.Start:g.End]) {
 					if entry.Surface == g.Word {
 						e.nextWord = g.Word
-						e.nextReading = s.syls[g.Start:g.End]
+						e.nextReading = typed[g.Start:g.End]
 						break
 					}
 				}
@@ -77,8 +78,8 @@ func (s *Session) localEvidence(base int) func(int, int, string, string) (float6
 			if i+n > limit || i < e.start+n && e.start < i+n {
 				continue
 			}
-			left := i > base && e.left != "" && s.syls[i-1] == e.left
-			right := i+n < limit && e.right != "" && s.syls[i+n] == e.right
+			left := i > base && e.left != "" && typed[i-1] == e.left
+			right := i+n < limit && e.right != "" && typed[i+n] == e.right
 			if e.right != "" && i+n < limit && !right {
 				continue
 			}
@@ -87,7 +88,7 @@ func (s *Session) localEvidence(base int) func(int, int, string, string) (float6
 			}
 			match := true
 			for j, y := range e.reading {
-				if s.syls[i+j] != y {
+				if typed[i+j] != y {
 					match = false
 					break
 				}
@@ -99,7 +100,7 @@ func (s *Session) localEvidence(base int) func(int, int, string, string) (float6
 			if e.nextWord != "" && i+n+len(e.nextReading) <= limit {
 				match := true
 				for j, y := range e.nextReading {
-					if s.syls[i+n+j] != y {
+					if typed[i+n+j] != y {
 						match = false
 						break
 					}

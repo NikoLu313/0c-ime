@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// #83：鍵盤排列預設標準；舊設定檔沒有欄位時不變；選倚天 41 鍵可保存、改回。
+// 鍵盤排列預設標準；舊設定檔沒有欄位時不變；選倚天 41 鍵或許氏可保存、改回。
 func TestKeyboardLayoutDefaultsStandardAndPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	if s, err := Load(path); err != nil || s.KeyboardLayout != LayoutStandard {
@@ -19,7 +19,7 @@ func TestKeyboardLayoutDefaultsStandardAndPersists(t *testing.T) {
 	if s, err := Load(path); err != nil || s.KeyboardLayout != LayoutStandard {
 		t.Fatalf("舊設定檔：%+v %v", s, err)
 	}
-	for _, value := range []string{"eten", "standard", "eten"} {
+	for _, value := range []string{"eten", "hsu", "standard", "eten", "hsu"} {
 		s, err := Load(path)
 		if err != nil {
 			t.Fatal(err)
@@ -40,7 +40,7 @@ func TestKeyboardLayoutDefaultsStandardAndPersists(t *testing.T) {
 		}
 	}
 	var s Settings
-	if err := s.Set("keyboard-layout", "hsu"); err == nil {
+	if err := s.Set("keyboard-layout", "future-layout"); err == nil {
 		t.Fatal("不認得的排列應拒絕")
 	}
 }
@@ -48,7 +48,7 @@ func TestKeyboardLayoutDefaultsStandardAndPersists(t *testing.T) {
 // 較新版本寫入本版不認得的排列：退回標準排列，存檔時原值保留。
 func TestKeyboardLayoutUnknownValueKept(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
-	if err := os.WriteFile(path, []byte(`{"schema":1,"keyboard_layout":"hsu"}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"schema":1,"keyboard_layout":"future-layout"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	s, err := Load(path)
@@ -61,8 +61,49 @@ func TestKeyboardLayoutUnknownValueKept(t *testing.T) {
 	if err := Save(path, s); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(path); !strings.Contains(string(b), `"keyboard_layout":"hsu"`) && !strings.Contains(string(b), `"keyboard_layout": "hsu"`) {
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), `"keyboard_layout":"future-layout"`) && !strings.Contains(string(b), `"keyboard_layout": "future-layout"`) {
 		t.Fatalf("原值應保留：%s", b)
+	}
+}
+
+func TestHsuDisablesMixedInputAndKeepsEmoji(t *testing.T) {
+	s := Default()
+	s.MixedInput = true
+	if err := s.Set("keyboard-layout", LayoutHsu); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range s.Items() {
+		switch it.Key {
+		case "keyboard-layout":
+			if it.Value != LayoutHsu || it.ValueLabels[LayoutHsu] != "許氏注音" || !strings.Contains(strings.Join(it.Values, "|"), LayoutHsu) {
+				t.Fatalf("許氏應能在設定介面選取：%+v", it)
+			}
+		case "mixed-input":
+			if !it.Disabled || it.DisabledReason != "許氏注音時關閉" || it.Value != "on" || it.Effective != "off" {
+				t.Fatalf("許氏停用混打並保留原值：%+v", it)
+			}
+		case "emoji-shortcut", "emoji-equals-first":
+			if it.Disabled {
+				t.Fatalf("許氏的 = 不與注音衝突，Emoji 應保留：%+v", it)
+			}
+		}
+	}
+	if s.EffectiveMixedInput() || !s.MixedInput || s.EmojiShortcut != "equals" {
+		t.Fatalf("混打實際關閉、原設定與 Emoji 保留：%+v", s)
+	}
+	for _, name := range []string{LayoutStandard, LayoutETen} {
+		if err := s.Set("keyboard-layout", name); err != nil {
+			t.Fatal(err)
+		}
+		if !s.EffectiveMixedInput() {
+			t.Fatalf("%s 應沿用既有的引擎設定", name)
+		}
+	}
+	if err := s.Set("mixed-input", "off"); err != nil {
+		t.Fatal(err)
+	}
+	if s.EffectiveMixedInput() {
+		t.Fatal("標準排列也應尊重關閉混打的設定")
 	}
 }
 

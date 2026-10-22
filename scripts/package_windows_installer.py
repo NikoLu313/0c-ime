@@ -76,6 +76,13 @@ def hash_stream(stream):
     return sha.hexdigest()
 
 
+def manual_updates_definition(channel, enabled):
+    """Only a deliberately requested private preview can change update policy."""
+    if enabled and channel != 'internal-preview':
+        raise ValueError('--manual-updates 僅能用於 internal-preview 測試包')
+    return '!define MANUAL_UPDATES\n' if enabled else ''
+
+
 def build(args):
     archive = args.archive.resolve()
     if archive.stat().st_size > 1 << 30:
@@ -86,6 +93,7 @@ def build(args):
         raise ValueError('Windows 檔案版本各段須在 65535 以內')
     sha = digest(archive)
     preview = release['channel'] == 'internal-preview'
+    manual_updates = manual_updates_definition(release['channel'], getattr(args, 'manual_updates', False))
     if not preview and not args.sign:
         raise ValueError('公開版安裝精靈必須簽章：請指定 --signtool、--sign-dlib、--sign-metadata')
     name = f'0c-{version}-windows-amd64' + ('-preview' if preview else '') + '-setup.exe'
@@ -111,6 +119,7 @@ def build(args):
             f'!define PUBLISHER "{PUBLISHER}"\n!define CHANNEL "{release["channel"]}"\n!define ARCHIVE_SHA256 "{sha}"\n'
             f'!define SETUP_ID "{version}-{sha[:12]}"\n'
             f'!define CHANNEL_LABEL "{"內部預覽版" if preview else "公開測試版"}"\n'
+            + manual_updates
             + ('!define SIGN_UNINSTALLER\n' if args.sign else ''), encoding='utf-8-sig')
         if args.sign:
             # NSIS 在產生 uninstall.exe 時呼叫（!uninstfinalize），傳入的 %1 已含引號。
@@ -138,6 +147,8 @@ def main():
     parser.add_argument('--archive', required=True, type=Path)
     parser.add_argument('--out', type=Path, default=ROOT / 'build/release')
     parser.add_argument('--makensis', default='makensis', help='NSIS 3 編譯器路徑')
+    parser.add_argument('--manual-updates', action='store_true',
+                        help='僅供 internal-preview：安裝成功後改為手動更新，避免自訂版被官網版本取代')
     parser.add_argument('--signtool', type=Path, help='Windows SDK x64 signtool.exe（簽章只能在 Windows 執行）')
     parser.add_argument('--sign-dlib', type=Path, help='Artifact Signing 用戶端的 Azure.CodeSigning.Dlib.dll')
     parser.add_argument('--sign-metadata', type=Path, help='Artifact Signing metadata.json')

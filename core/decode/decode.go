@@ -68,11 +68,9 @@ func matchedReading(lat input.Lattice, start int, reading []zhuyin.Syllable) str
 	return ""
 }
 
-// segMatched 是弧的 Matched：只有走了有成本的假設才可能與打的音不同，零成本弧不必比對。
+// segMatched 保留實際走到的讀音。許氏共鍵的多個精確假設成本同為零，
+// 所以不能只依成本判斷是否需要記錄讀音。
 func segMatched(lat input.Lattice, start int, e lexicon.Entry, cost float64) string {
-	if cost <= 0 {
-		return ""
-	}
 	return matchedReading(lat, start, e.Reading)
 }
 
@@ -437,7 +435,7 @@ func (d *Decoder) topPrefixed(sys lexicon.Source, reading []zhuyin.Syllable) []l
 
 // partialMatched 是尾端前綴段的 Matched：取最佳詞條讀音中對應已輸入音節的部分。
 func partialMatched(lat input.Lattice, start, end int, t *tail) string {
-	if t.bestCost <= 0 || len(t.best.Reading) < end-start {
+	if len(t.best.Reading) < end-start {
 		return ""
 	}
 	return matchedReading(lat, start, t.best.Reading[:end-start])

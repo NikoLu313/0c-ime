@@ -14,9 +14,10 @@ import (
 // 連同聲調（一聲不標），聲調符號緊接在 end() 之後。聲調還在時不還原成未完成注音，免得接著打的
 // 聲母蓋掉它；只有聲調符號被刪掉後才變回一般的暫存注音，讓使用者改打別的聲調。
 type pendingLiteral struct {
-	start    int
-	composer zhuyin.Composer
-	tone     int // 0：一般暫存注音；1–5：原樣留下的完整音節
+	hsuChoice string // 許氏明確選定的共鍵注音，暫存／恢復時一併保留
+	start     int
+	composer  zhuyin.Composer
+	tone      int // 0：一般暫存注音；1–5：原樣留下的完整音節
 	// prefix：音節本身沒有字、只是某個更長的詞的開頭，因此原樣留下（#107 的 ㄟ）。
 	// 下一個音節能和它成詞時收回去一起解碼；使用者從 ↓ 明確選的原樣音節不會帶這個標記。
 	prefix bool
@@ -72,6 +73,7 @@ func (s *Session) restorePendingLiteral() {
 			s.eraseBeforeCursor()
 		}
 		s.comp = p.composer
+		s.hsuChoice = p.hsuChoice
 		return
 	}
 }
@@ -79,8 +81,11 @@ func (s *Session) restorePendingLiteral() {
 // insertSyllableLiteral 把沒有字可讀、由聲調鍵完成的音節原樣留在游標處（#109、#107）：
 // 注音連同聲調成為字面文字，可見、可退格、Enter 照樣送出；字面文字是解碼邊界，不學習。
 // comp 是按聲調之前的組音狀態，接著打的注音從新的音節開始，不會蓋掉它。
-func (s *Session) insertSyllableLiteral(comp zhuyin.Composer, syl zhuyin.Syllable) {
+func (s *Session) insertSyllableLiteral(comp zhuyin.Composer, syl zhuyin.Syllable, exact ...bool) {
 	p := pendingLiteral{start: s.cursor, composer: comp, tone: syl.ToneOf()}
+	if len(exact) > 0 && exact[0] {
+		p.hsuChoice = comp.String()
+	}
 	s.insertLiteral(string(syl))
 	s.pendingLiterals = append(s.pendingLiterals, p)
 }
@@ -127,6 +132,7 @@ func (s *Session) retypeSyllableLiteral(sym rune) bool {
 
 // syllableState 是插入音節前的組字狀態，插入後解不出來時整個還原。
 type syllableState struct {
+	hsuExact        map[int]bool
 	syls            []zhuyin.Syllable
 	cursor          int
 	locks           map[int]decode.Lock
@@ -141,11 +147,12 @@ type syllableState struct {
 
 // 插入、刪除都會換成新的切片與對照表，淺複製就足以還原。
 func (s *Session) saveSyllables() syllableState {
-	return syllableState{s.syls, s.cursor, s.locks, s.literals, s.pendingLiterals, s.mixedKeys, s.literalKeys, s.mixedOrigins, s.displayed,
+	return syllableState{s.hsuExact, s.syls, s.cursor, s.locks, s.literals, s.pendingLiterals, s.mixedKeys, s.literalKeys, s.mixedOrigins, s.displayed,
 		append([]personal.RejectedSeg(nil), s.rejected...)}
 }
 
 func (s *Session) restoreSyllables(st syllableState) {
+	s.hsuExact = st.hsuExact
 	s.syls, s.cursor, s.locks, s.literals, s.pendingLiterals = st.syls, st.cursor, st.locks, st.literals, st.pendingLiterals
 	s.mixedKeys, s.literalKeys, s.mixedOrigins, s.displayed, s.rejected = st.mixedKeys, st.literalKeys, st.mixedOrigins, st.displayed, st.rejected
 }
@@ -236,8 +243,9 @@ func (s *Session) openSyllableLiteral(p pendingLiteral) {
 
 // pendingStash 是切到英文時清掉的未打完注音（#90），包含中英混打尚未定案、畫面顯示成注音的按鍵。
 type pendingStash struct {
-	comp  zhuyin.Composer
-	mixed pendingKeys
+	hsuChoice string
+	comp      zhuyin.Composer
+	mixed     pendingKeys
 }
 
 // clearPendingZhuyin 清掉未打完的注音，已組好的字保留；沒有可清的內容時回傳 nil。
@@ -252,7 +260,9 @@ func (s *Session) clearPendingZhuyin() *pendingStash {
 	}
 	if !s.comp.Empty() {
 		stash.comp = s.comp
+		stash.hsuChoice = s.hsuChoice
 		s.comp.Reset()
+		s.hsuChoice = ""
 	}
 	if stash.mixed.raw == "" && stash.comp.Empty() {
 		return nil

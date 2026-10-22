@@ -10,6 +10,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/english"
 	"github.com/0c-biggo/0c-ime/core/input"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
@@ -366,6 +367,13 @@ func (s *Session) readingReachable(done zhuyin.Syllable) bool {
 // neutralFallback（#69）：句尾語氣詞常打成輕聲，詞庫卻只收一聲，例如 ㄛ˙ 沒有字、
 // ㄛ 是「喔」。輕聲讀音在目前語境完全找不到時改用一聲；有字或一聲也沒有時維持原樣。
 func (s *Session) neutralFallback(done zhuyin.Syllable) zhuyin.Syllable {
+	if s.layout == layout.Hsu {
+		for _, alt := range layout.Alternatives(s.layout, done) {
+			if s.readingReachable(alt) {
+				return done // 同聲調的共鍵讀音可達，不能先退成一聲。
+			}
+		}
+	}
 	if done.ToneOf() != 5 || s.readingReachable(done) {
 		return done
 	}

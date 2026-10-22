@@ -33,6 +33,7 @@ const (
 
 	LayoutStandard = "standard" // 標準（大千）注音鍵盤排列
 	LayoutETen     = "eten"     // 倚天 41 鍵（#83）
+	LayoutHsu      = "hsu"      // 許氏注音（共鍵排列）
 )
 
 // 讀取結果的檔案狀態。
@@ -80,7 +81,7 @@ type Settings struct {
 	CandidateLayout    string `json:"candidate_layout"`
 	EmojiShortcut      string `json:"emoji_shortcut"`
 	EmojiEqualsFirst   bool   `json:"emoji_equals_first"`
-	KeyboardLayout     string `json:"keyboard_layout"` // standard（預設）或 eten（倚天 41 鍵，#83）
+	KeyboardLayout     string `json:"keyboard_layout"` // standard（預設）、eten（倚天 41 鍵）或 hsu（許氏注音）
 	// OutputSimplified：送出時把繁體轉成簡體（#118）；組字、候選與學習仍是繁體。預設 false。
 	OutputSimplified bool `json:"output_simplified"`
 	// SimplifiedHotkey：按 SimplifiedHotkeyLabel 的快捷鍵切換「輸出簡體字」（#192）。預設 false：外殼不攔這個鍵，
@@ -288,6 +289,12 @@ func (s Settings) EffectiveStartMode() string {
 	return StartZhuyin
 }
 
+// EffectiveMixedInput 是引擎使用的中英混打狀態。許氏採共鍵排列，不能套用標準排列的混打判斷；
+// 保留設定檔原值，切回標準排列時恢復。倚天沿用既有的 session 停用規則。
+func (s Settings) EffectiveMixedInput() bool {
+	return s.MixedInput && s.KeyboardLayout != LayoutHsu
+}
+
 // startModeLocked：中英切換鍵設為不用 Shift、這個平台又沒有其他切回注音的方法時，開始時的模式固定是注音（#184）。
 // 不然開始時英文就再也打不出注音：macOS 的 Caps Lock 短按切換的是系統輸入來源、按住只是暫時的大寫英文，
 // Fcitx5 沒有切換中英的選單項目。Windows 一律可以按 Ctrl＋空白鍵或點工作列的中／英，不受限制。
@@ -373,7 +380,7 @@ func (s *Settings) UnmarshalJSON(b []byte) error {
 		{"candidate_cursor", &s.CandidateCursor, []string{"before", "after"}},
 		{"candidate_layout", &s.CandidateLayout, []string{"vertical", "grid"}},
 		{"emoji_shortcut", &s.EmojiShortcut, []string{"off", "equals"}},
-		{"keyboard_layout", &s.KeyboardLayout, []string{LayoutStandard, LayoutETen}},
+		{"keyboard_layout", &s.KeyboardLayout, []string{LayoutStandard, LayoutETen, LayoutHsu}},
 		{"selection_keys", &s.SelectionKeys, []string{SelectDigits, SelectQwer, SelectHome}},
 		{"toggle_key", &s.ToggleKey, []string{ToggleRight, ToggleBoth, ToggleLeft, ToggleNone}},
 		{"mode_memory", &s.ModeMemory, []string{ModeNative, ModeShared}},
@@ -699,6 +706,8 @@ type spec struct {
 // valueLabels 是選項的顯示名稱（Item.ValueLabels）；設定程式沒有時用自己的對照表。
 func (s Settings) valueLabels(key string) map[string]string {
 	switch key {
+	case "keyboard-layout":
+		return map[string]string{LayoutStandard: "標準", LayoutETen: "倚天 41 鍵", LayoutHsu: "許氏注音"}
 	case "toggle-key":
 		return map[string]string{ToggleRight: "右 Shift", ToggleBoth: "左右 Shift", ToggleLeft: "左 Shift", ToggleNone: "不用 Shift"}
 	case "start-mode":
@@ -712,7 +721,8 @@ func (s Settings) valueLabels(key string) map[string]string {
 }
 
 // disabledReason 回報某一項目前是否因其他設定而不起作用，以及給人讀的原因；空字串表示可用。
-// 中英混打與 = 開 Emoji 選單依標準排列設計，倚天 41 鍵時停用（#83）；已儲存的值不動，切回標準排列就照舊。
+// 中英混打只支援標準排列；倚天 41 鍵另停用 = 開 Emoji 選單（#83）。許氏的 = 不與注音衝突，保留 Emoji。
+// 已儲存的值不動，切回標準排列就照舊。
 func (s Settings) disabledReason(key string) string {
 	return s.disabledReasonOn(runtime.GOOS, key)
 }
@@ -722,6 +732,9 @@ func (s Settings) disabledReasonOn(goos, key string) string {
 	case "mixed-input", "emoji-shortcut", "emoji-equals-first":
 		if s.KeyboardLayout == LayoutETen {
 			return "倚天 41 鍵時關閉"
+		}
+		if key == "mixed-input" && s.KeyboardLayout == LayoutHsu {
+			return "許氏注音時關閉"
 		}
 	case "start-mode":
 		if s.startModeLocked(goos) {
@@ -773,7 +786,7 @@ func specs() []spec {
 			func(s Settings) string { return onOff(s.SimplifiedHotkey) }},
 		{"emoji-shortcut", "Emoji 選單", "在注音模式按 = 開啟選單；Tab 切換顏文字，選過的排前面", "equals", []string{"off", "equals"}, func(s Settings) string { return s.EmojiShortcut }},
 		{"emoji-equals-first", "將 = 放在第一項", "關閉後，按兩次 == 可輸入一個 =", "on", []string{"on", "off"}, func(s Settings) string { return onOff(s.EmojiEqualsFirst) }},
-		{"keyboard-layout", "鍵盤排列", "注音鍵盤排列。倚天 41 鍵的 = 是 ㄦ、' 是 ㄘ，頓號改按 \\；這時不提供 Emoji 選單與中英混打", LayoutStandard, []string{LayoutStandard, LayoutETen},
+		{"keyboard-layout", "鍵盤排列", "注音鍵盤排列。許氏注音採共鍵排列，不提供中英混打；Emoji 選單仍可使用。倚天 41 鍵的 = 是 ㄦ、' 是 ㄘ，頓號改按 \\；這時不提供 Emoji 選單與中英混打", LayoutStandard, []string{LayoutStandard, LayoutETen, LayoutHsu},
 			func(s Settings) string { return s.KeyboardLayout }},
 		{"selection-keys", "選字鍵", "候選窗用哪一排鍵選第 1 到第 10 個字；換成字母鍵時，數字鍵仍可照位置選字", SelectDigits, []string{SelectDigits, SelectQwer, SelectHome},
 			func(s Settings) string { return s.SelectionKeys }},
@@ -932,6 +945,9 @@ func (s Settings) Items() []Item {
 		value, effective := sp.value(s), ""
 		if sp.key == "start-mode" && reason != "" && value != StartZhuyin {
 			effective = StartZhuyin
+		}
+		if sp.key == "mixed-input" && s.KeyboardLayout == LayoutHsu && value != "off" {
+			effective = "off"
 		}
 		out = append(out, Item{Key: sp.key, Type: "choice", Values: sp.values, Default: sp.def, Value: value, Label: sp.label, Description: sp.description,
 			Disabled: reason != "", DisabledReason: reason, Effective: effective, ValueLabels: s.valueLabels(sp.key)})

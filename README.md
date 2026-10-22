@@ -1,3 +1,15 @@
+> **許氏注音 Windows 測試版（NikoLu313 Fork）**
+>
+> 本分支在 [0c-biggo/0c-ime](https://github.com/0c-biggo/0c-ime) 基底 `37d8307` 加入許氏注音，保留標準與倚天排列。這是個人維護的測試版，並非上游官方發行版；下方原專案介紹與官網連結保留作為來源說明。
+>
+> **[下載 Windows 安裝 EXE（0.2.5-hsu.1）](https://github.com/NikoLu313/0c-ime/releases/download/hsu-v0.2.5-hsu.1/0c-0.2.5-hsu.1-windows-amd64-preview-setup.exe)** · [Release 與 SHA-256](https://github.com/NikoLu313/0c-ime/releases/tag/hsu-v0.2.5-hsu.1)
+>
+> 適用 Windows x64，含 x86 應用程式使用的外殼、設定介面、字典及本機模型，約 363 MiB。安裝包未簽章，會升級既有靈犀注音並保留個人詞庫；為保留許氏功能，安裝後採手動更新。
+>
+> 安裝完成後登出再登入，在「靈犀注音設定 → 輸入設定 → 鍵盤 → 鍵盤排列」選「許氏注音」。以 Win＋空白切換後，輸入 `nefhwf` 應組出「你好」，按 Enter 送出。許氏模式停用中英混打，`=` 仍可開 Emoji；獨立 ㄟ／ㄝ／ㄥ 可從共鍵候選選取。
+>
+> 功能原始碼位於 [`feature/hsu-zhuyin`](https://github.com/NikoLu313/0c-ime/tree/feature/hsu-zhuyin)。本測試版已通過許氏核心、Windows 外殼及最終套件的隔離驗證；目前只提供 Windows 安裝包。
+
 <p align="center">
   <img src=".github/assets/logo.svg" width="96" height="96" alt="靈犀注音 0C">
 </p>
